@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/go-chassis/paas_lager/lager"
-	"github.com/go-chassis/paas_lager/lager/chug"
-	. "github.com/go-chassis/paas_lager/lager/ginkgoreporter"
+	"github.com/lexkong/lager"
+	"github.com/lexkong/lager/chug"
+	. "github.com/lexkong/lager/ginkgoreporter"
 
 	. "github.com/onsi/ginkgo"
 	"github.com/onsi/ginkgo/config"

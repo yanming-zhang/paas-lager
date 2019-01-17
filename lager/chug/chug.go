@@ -9,14 +9,16 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-chassis/paas-lager/third_party/forked/cloudfoundry/lager"
+	"github.com/lexkong/lager"
 )
+
 //Entry is a struct
 type Entry struct {
 	IsLager bool
 	Raw     []byte
 	Log     LogEntry
 }
+
 //LogEntry is a struct
 type LogEntry struct {
 	Timestamp time.Time

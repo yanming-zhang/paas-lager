@@ -4,7 +4,7 @@ import (
 	"runtime"
 	"sync"
 
-	"github.com/go-chassis/paas-lager/lager"
+	"github.com/lexkong/lager"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"

@@ -1,145 +1,203 @@
 package log
 
 import (
-	"fmt"
-	"github.com/go-chassis/paas-lager/third_party/forked/cloudfoundry/lager"
-	"io"
+	"encoding/json"
+	"io/ioutil"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
-	"sync"
+
+	"github.com/lexkong/log/lager"
+	"gopkg.in/yaml.v2"
 )
 
+// constant values for logrotate parameters
 const (
-	//DEBUG is a constant of string type
-	DEBUG = "DEBUG"
-	//INFO is constant for info level log
-	INFO = "INFO"
-	//WARN is constant for warn level log
-	WARN = "WARN"
-	//ERROR is constant for error level log
-	ERROR = "ERROR"
-	//FATAL is constant for fail level log
-	FATAL = "FATAL"
+	RollingPolicySize = "size"
+	LogRotateDate     = 1
+	LogRotateSize     = 10
+	LogBackupCount    = 7
 )
 
-//Config is a struct which stores details for maintaining logs
-type Config struct {
-	LoggerLevel    string   `yaml:"loggerLevel"`
-	LoggerFile     string   `yaml:"loggerFile"`
-	Writers        []string `yaml:"writers,flow"`
-	LogFormatText  bool     `yaml:"logFormatText"`
-	EnableRsyslog  bool
-	RsyslogNetwork string
-	RsyslogAddr    string
+// Lager struct for logger parameters
+type Lager struct {
+	Writers        string `yaml:"writers"`
+	LoggerLevel    string `yaml:"logger_level"`
+	LoggerFile     string `yaml:"logger_file"`
+	LogFormatText  bool   `yaml:"log_format_text"`
+	RollingPolicy  string `yaml:"rollingPolicy"`
+	LogRotateDate  int    `yaml:"log_rotate_date"`
+	LogRotateSize  int    `yaml:"log_rotate_size"`
+	LogBackupCount int    `yaml:"log_backup_count"`
 }
 
-var config = DefaultConfig()
-var m sync.RWMutex
-
-//Writers is a map
-var Writers = make(map[string]io.Writer)
-
-//RegisterWriter is used to register a io writer
-func RegisterWriter(name string, writer io.Writer) {
-	m.Lock()
-	Writers[name] = writer
-	m.Unlock()
+//PassLagerCfg is the struct for lager information(passlager.yaml)
+type PassLagerCfg struct {
+	Writers        string `yaml:"writers"`
+	LoggerLevel    string `yaml:"logger_level"`
+	LoggerFile     string `yaml:"logger_file"`
+	LogFormatText  bool   `yaml:"log_format_text"`
+	RollingPolicy  string `yaml:"rollingPolicy"`
+	LogRotateDate  int    `yaml:"log_rotate_date"`
+	LogRotateSize  int    `yaml:"log_rotate_size"`
+	LogBackupCount int    `yaml:"log_backup_count"`
 }
 
-//DefaultConfig is a function which retuns config object with default configuration
-func DefaultConfig() *Config {
-	return &Config{
-		LoggerLevel:    INFO,
-		LoggerFile:     "",
-		EnableRsyslog:  false,
-		RsyslogNetwork: "udp",
-		RsyslogAddr:    "127.0.0.1:5140",
-		LogFormatText:  false,
+// Logger is the global variable for the object of lager.Logger
+var Logger lager.Logger
+
+// logFilePath log file path
+var logFilePath string
+
+// PassLagerDefinition is having the information about loging
+var PassLagerDefinition *PassLagerCfg = DefaultLagerDefinition()
+
+// Initialize Build constructs a *Lager.Logger with the configured parameters.
+func Initialize(writers, loggerLevel, loggerFile, rollingPolicy string, logFormatText bool,
+	LogRotateDate, LogRotateSize, LogBackupCount int) {
+	lag := &Lager{
+		Writers:        writers,
+		LoggerLevel:    loggerLevel,
+		LoggerFile:     loggerFile,
+		LogFormatText:  logFormatText,
+		RollingPolicy:  rollingPolicy,
+		LogRotateDate:  LogRotateDate,
+		LogRotateSize:  LogRotateSize,
+		LogBackupCount: LogBackupCount,
 	}
+
+	Logger = newLog(lag)
+	initLogRotate(logFilePath, lag)
+	return
 }
 
-//Init is a function which initializes all config struct variables
-func Init(c Config) {
-	if c.LoggerLevel != "" {
-		config.LoggerLevel = c.LoggerLevel
-	}
+// newLog new log
+func newLog(lag *Lager) lager.Logger {
+	checkPassLagerDefinition(lag)
 
-	if c.LoggerFile != "" {
-		config.LoggerFile = c.LoggerFile
-		config.Writers = append(config.Writers, "file")
-	}
-
-	if c.EnableRsyslog {
-		config.EnableRsyslog = c.EnableRsyslog
-	}
-
-	if c.RsyslogNetwork != "" {
-		config.RsyslogNetwork = c.RsyslogNetwork
-	}
-
-	if c.RsyslogAddr != "" {
-		config.RsyslogAddr = c.RsyslogAddr
-	}
-	if len(c.Writers) == 0 {
-		config.Writers = append(config.Writers, "stdout")
-
+	if filepath.IsAbs(lag.LoggerFile) {
+		createLogFile("", lag.LoggerFile)
+		logFilePath = filepath.Join("", lag.LoggerFile)
 	} else {
-		config.Writers = c.Writers
+		createLogFile(os.Getenv("CHASSIS_HOME"), lag.LoggerFile)
+		logFilePath = filepath.Join(os.Getenv("CHASSIS_HOME"), lag.LoggerFile)
 	}
-	config.LogFormatText = c.LogFormatText
-	RegisterWriter("stdout", os.Stdout)
-	var file io.Writer
-	var err error
-	if config.LoggerFile != "" {
-		file, err = os.OpenFile(config.LoggerFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0666)
-		if err != nil {
-			panic(err)
-		}
-
+	writers := strings.Split(strings.TrimSpace(lag.Writers), ",")
+	if len(strings.TrimSpace(lag.Writers)) == 0 {
+		writers = []string{"stdout"}
 	}
-	for _, sink := range config.Writers {
-		if sink == "file" {
-			if file == nil {
-				log.Panic("Must set file path")
-			}
-			RegisterWriter("file", file)
-		}
-	}
-}
+	LagerInit(Config{
+		Writers:       writers,
+		LoggerLevel:   lag.LoggerLevel,
+		LoggerFile:    logFilePath,
+		LogFormatText: lag.LogFormatText,
+	})
 
-//NewLogger is a function
-func NewLogger(component string) lager.Logger {
-	return NewLoggerExt(component, component)
-}
-
-//NewLoggerExt is a function which is used to write new logs
-func NewLoggerExt(component string, appGUID string) lager.Logger {
-	var lagerLogLevel lager.LogLevel
-	switch strings.ToUpper(config.LoggerLevel) {
-	case DEBUG:
-		lagerLogLevel = lager.DEBUG
-	case INFO:
-		lagerLogLevel = lager.INFO
-	case WARN:
-		lagerLogLevel = lager.WARN
-	case ERROR:
-		lagerLogLevel = lager.ERROR
-	case FATAL:
-		lagerLogLevel = lager.FATAL
-	default:
-		panic(fmt.Errorf("unknown logger level: %s", config.LoggerLevel))
-	}
-	logger := lager.NewLoggerExt(component, config.LogFormatText)
-	for _, sink := range config.Writers {
-
-		writer, ok := Writers[sink]
-		if !ok {
-			log.Panic("Unknow writer: ", sink)
-		}
-		sink := lager.NewReconfigurableSink(lager.NewWriterSink(sink, writer, lager.DEBUG), lagerLogLevel)
-		logger.RegisterSink(sink)
-	}
-
+	logger := NewLogger(lag.LoggerFile)
 	return logger
+}
+
+// checkPassLagerDefinition check pass lager definition
+func checkPassLagerDefinition(lag *Lager) {
+	if lag.LoggerLevel == "" {
+		lag.LoggerLevel = "DEBUG"
+	}
+
+	if lag.LoggerFile == "" {
+		lag.LoggerFile = "log/chassis.log"
+	}
+
+	if lag.RollingPolicy == "" {
+		log.Println("RollingPolicy is empty, use default policy[size]")
+		lag.RollingPolicy = RollingPolicySize
+	} else if lag.RollingPolicy != "daily" && lag.RollingPolicy != RollingPolicySize {
+		log.Printf("RollingPolicy is error, RollingPolicy=%s, use default policy[size].", lag.RollingPolicy)
+		lag.RollingPolicy = RollingPolicySize
+	}
+
+	if lag.LogRotateDate <= 0 || lag.LogRotateDate > 10 {
+		lag.LogRotateDate = LogRotateDate
+	}
+
+	if lag.LogRotateSize <= 0 || lag.LogRotateSize > 50 {
+		lag.LogRotateSize = LogRotateSize
+	}
+
+	if lag.LogBackupCount < 0 || lag.LogBackupCount > 100 {
+		lag.LogBackupCount = LogBackupCount
+	}
+}
+
+// createLogFile create log file
+func createLogFile(localPath, outputpath string) {
+	_, err := os.Stat(strings.Replace(filepath.Dir(filepath.Join(localPath, outputpath)), "\\", "/", -1))
+	if err != nil && os.IsNotExist(err) {
+		os.MkdirAll(strings.Replace(filepath.Dir(filepath.Join(localPath, outputpath)), "\\", "/", -1), os.ModePerm)
+	} else if err != nil {
+		panic(err)
+	}
+	f, err := os.OpenFile(strings.Replace(filepath.Join(localPath, outputpath), "\\", "/", -1), os.O_CREATE, os.ModePerm)
+	if err != nil {
+		panic(err)
+	}
+	defer f.Close()
+}
+
+// readPassLagerConfigFile is unmarshal the paas lager configuration file(lager.yaml)
+func InitWithFile(lagerFile string) error {
+	if lagerFile == "" {
+		log.Printf("log config file is empty, use default config: `%s`\n", marshalDefinition())
+		return Init()
+	}
+
+	passLagerDef := PassLagerCfg{}
+	yamlFile, err := ioutil.ReadFile(lagerFile)
+	if err != nil {
+		log.Printf("yamlFile.Get err   #%v, use default config: `%s`\n", err, marshalDefinition())
+		return Init()
+	}
+
+	err = yaml.Unmarshal(yamlFile, &passLagerDef)
+	if err != nil {
+		log.Printf("Unmarshal: %v, use default config: `%s`\n", err, marshalDefinition())
+		return Init()
+	}
+
+	PassLagerDefinition = &passLagerDef
+	return Init()
+}
+
+func InitWithConfig(passLagerDef *PassLagerCfg) error {
+	PassLagerDefinition = passLagerDef
+	return Init()
+}
+
+func DefaultLagerDefinition() *PassLagerCfg {
+	cfg := PassLagerCfg{
+		Writers:        "stdout,file",
+		LoggerLevel:    "DEBUG",
+		LoggerFile:     "logs/chassis.log",
+		LogFormatText:  false,
+		RollingPolicy:  RollingPolicySize,
+		LogRotateDate:  1,
+		LogRotateSize:  10,
+		LogBackupCount: 7,
+	}
+
+	return &cfg
+}
+
+func Init() error {
+	Initialize(PassLagerDefinition.Writers, PassLagerDefinition.LoggerLevel,
+		PassLagerDefinition.LoggerFile, PassLagerDefinition.RollingPolicy,
+		PassLagerDefinition.LogFormatText, PassLagerDefinition.LogRotateDate,
+		PassLagerDefinition.LogRotateSize, PassLagerDefinition.LogBackupCount)
+
+	return nil
+}
+
+func marshalDefinition() string {
+	data, _ := json.Marshal(PassLagerDefinition)
+	return string(data)
 }

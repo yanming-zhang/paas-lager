@@ -2,9 +2,10 @@ package lager
 
 import (
 	"bytes"
-	"github.com/go-chassis/paas-lager/third_party/forked/cloudfoundry/lager/color"
 	"io"
 	"sync"
+
+	"github.com/lexkong/log/lager/color"
 )
 
 const logBufferSize = 1024
@@ -22,6 +23,7 @@ type writerSink struct {
 	name        string
 	writeL      *sync.Mutex
 }
+
 //NewWriterSink is function which returns new struct object
 func NewWriterSink(name string, writer io.Writer, minLogLevel LogLevel) Sink {
 	return &writerSink{
@@ -43,8 +45,8 @@ func (sink *writerSink) Log(level LogLevel, log []byte) {
 			log = bytes.Replace(log, []byte("ERROR"), color.ErrorByte, -1)
 		} else if bytes.Contains(log, []byte("FATAL")) {
 			log = bytes.Replace(log, []byte("FATAL"), color.FatalByte, -1)
-		} else if bytes.Contains(log, []byte("INFO")) {
-			log = bytes.Replace(log, []byte("INFO"), color.InfoByte, -1)
+		} else if bytes.Contains(log, []byte("DEBUG")) {
+			log = bytes.Replace(log, []byte("DEBUG"), color.DebugByte, -1)
 		}
 	}
 	log = append(log, '\n')

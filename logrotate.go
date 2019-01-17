@@ -12,37 +12,23 @@
 //See the License for the specific language governing permissions and
 //limitations under the License.
 
-// Package rotate is the package for rotate
-package rotate
+// Package lager is the package for lager
+package log
 
 import (
 	"archive/zip"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
 	"time"
-
-	"github.com/go-chassis/paas-lager/third_party/forked/cloudfoundry/lager"
-	"log"
 )
 
-var (
-	pathReplacer *strings.Replacer
-	//Logger is a object for Logger interface
-	Logger lager.Logger
-)
-
-// constant values for logrotate parameters
-const (
-	LogRotateDate     = 1
-	LogRotateSize     = 10
-	LogBackupCount    = 7
-	RollingPolicySize = "size"
-)
+var pathReplacer *strings.Replacer
 
 // EscapPath escape path
 func EscapPath(msg string) string {
@@ -82,7 +68,7 @@ func removeExceededFiles(path string, baseFileName string,
 	}
 	fileList, err := FilterFileList(path, pat)
 	if err != nil {
-		Logger.Errorf("filepath.Walk() path: %s failed.", EscapPath(path))
+		Logger.Errorf(err, "filepath.Walk() path: %s failed.", EscapPath(path))
 		return
 	}
 	sort.Strings(fileList)
@@ -94,7 +80,7 @@ func removeExceededFiles(path string, baseFileName string,
 		filePath := fileList[0]
 		err := removeFile(filePath)
 		if err != nil {
-			Logger.Errorf("remove filePath: %s failed.", EscapPath(filePath))
+			Logger.Errorf(err, "remove filePath: %s failed.", EscapPath(filePath))
 			break
 		}
 		//remove the first element of a list
@@ -149,7 +135,7 @@ func shouldRollover(fPath string, MaxFileSize int) bool {
 
 	fileInfo, err := os.Stat(fPath)
 	if err != nil {
-		Logger.Errorf("state path: %s failed.", EscapPath(fPath))
+		Logger.Errorf(err, "state path: %s failed.", EscapPath(fPath))
 		return false
 	}
 
@@ -169,13 +155,13 @@ func doRollover(fPath string, MaxFileSize int, MaxBackupCount int) {
 	rotateFile := fPath + "." + timeStamp
 	err := CopyFile(fPath, rotateFile)
 	if err != nil {
-		Logger.Errorf("copy path: %s failed.", EscapPath(fPath))
+		Logger.Errorf(err, "copy path: %s failed.", EscapPath(fPath))
 	}
 
 	//truncate the file
 	f, err := os.OpenFile(fPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
 	if err != nil {
-		Logger.Errorf("truncate path: %s failed.", EscapPath(fPath))
+		Logger.Errorf(err, "truncate path: %s failed.", EscapPath(fPath))
 		return
 	}
 	f.Close()
@@ -191,7 +177,7 @@ func doBackup(fPath string, MaxBackupCount int) {
 	pat := fmt.Sprintf(`%s\.[0-9]{1,17}$`, filepath.Base(fPath))
 	rotateFileList, err := FilterFileList(filepath.Dir(fPath), pat)
 	if err != nil {
-		Logger.Errorf("walk path: %s failed.", EscapPath(fPath))
+		Logger.Errorf(err, "walk path: %s failed.", EscapPath(fPath))
 		return
 	}
 
@@ -206,12 +192,12 @@ func doBackup(fPath string, MaxBackupCount int) {
 			err = compressFile(file, filepath.Base(fPath), true)
 		}
 		if err != nil {
-			Logger.Errorf("compress path: %s failed.", EscapPath(file))
+			Logger.Errorf(err, "compress path: %s failed.", EscapPath(file))
 			continue
 		}
 		err = removeFile(file)
 		if err != nil {
-			Logger.Errorf("remove path %s failed.", EscapPath(file))
+			Logger.Errorf(err, "remove path %s failed.", EscapPath(file))
 		}
 	}
 
@@ -222,7 +208,7 @@ func doBackup(fPath string, MaxBackupCount int) {
 func logRotateFile(file string, MaxFileSize int, MaxBackupCount int) {
 	defer func() {
 		if e := recover(); e != nil {
-			Logger.Errorf("LogRotate file path: %s catch an exception.", EscapPath(file))
+			Logger.Errorf(nil, "LogRotate file path: %s catch an exception.", EscapPath(file))
 		}
 	}()
 
@@ -238,14 +224,14 @@ func LogRotate(path string, MaxFileSize int, MaxBackupCount int) {
 	//filter .log .trace files
 	defer func() {
 		if e := recover(); e != nil {
-			Logger.Errorf("LogRotate catch an exception")
+			Logger.Errorf(nil, "LogRotate catch an exception")
 		}
 	}()
 
 	pat := `.(\.log|\.trace|\.out)$`
 	fileList, err := FilterFileList(path, pat)
 	if err != nil {
-		Logger.Errorf("filepath.Walk() path: %s failed.", path)
+		Logger.Errorf(err, "filepath.Walk() path: %s failed.", path)
 		return
 	}
 
@@ -304,17 +290,8 @@ func CopyFile(srcFile, destFile string) error {
 	return err
 }
 
-//RotateConfig is log rotate configs
-type RotateConfig struct {
-	RollingPolicy  string `yaml:"rollingPolicy"` // size or daily
-	LogRotateSize  int    `yaml:"logRotateSize"` //M Bytes.
-	LogBackupCount int    `yaml:"logBackupCount"`
-	LogRotateDate  int    `yaml:"logRotateDate"` //hours
-}
-
-// RunLogRotate initialize log rotate
-func RunLogRotate(logFilePath string, c *RotateConfig, logger lager.Logger) {
-	Logger = logger
+// initLogRotate initialize log rotate
+func initLogRotate(logFilePath string, c *Lager) {
 	if logFilePath == "" {
 		return
 	}
@@ -346,7 +323,7 @@ func RunLogRotate(logFilePath string, c *RotateConfig, logger lager.Logger) {
 }
 
 // checkPassLagerDefinition check pass lager definition
-func checkConfig(c *RotateConfig) {
+func checkConfig(c *Lager) {
 	if c.RollingPolicy == "" {
 		log.Println("RollingPolicy is empty, use default policy[size]")
 		c.RollingPolicy = RollingPolicySize

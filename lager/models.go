@@ -2,7 +2,6 @@ package lager
 
 import (
 	"encoding/json"
-	"github.com/go-mesh/openlogging"
 )
 
 //LogLevel is a user defined variable of type int
@@ -42,13 +41,16 @@ func (x LogLevel) MarshalJSON() ([]byte, error) {
 	return json.Marshal(level)
 }
 
+//Data is a map
+type Data map[string]interface{}
+
 //LogFormat is a struct which stores details about log
 type LogFormat struct {
-	LogLevel  LogLevel         `json:"level"`
-	Timestamp string           `json:"timestamp"`
-	File      string           `json:"file"`
-	Message   string           `json:"msg"`
-	Data      openlogging.Tags `json:"data,omitempty"`
+	LogLevel  LogLevel `json:"level"`
+	Timestamp string   `json:"timestamp"`
+	File      string   `json:"file"`
+	Message   string   `json:"msg"`
+	Data      Data     `json:"data,omitempty"`
 }
 
 //ToJSON which converts data of log file in to JSON file
